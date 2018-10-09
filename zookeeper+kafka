@@ -1,59 +1,187 @@
-pache Kafka是分布式发布-订阅消息系统。它最初由LinkedIn公司开发，之后成为Apache项目的一部分。Kafka是一种快速、可扩展的、设计内在就是分布式的，分区的和可复制的提交日志服务。
-
-kafka对消息保存时根据Topic进行归类，发送消息者成为Producer,消息接受者成为Consumer,此外kafka集群有多个kafka实例组成，每个实例(server)成为broker。无论是kafka集群，还是producer和consumer都依赖于zookeeper来保证系统可用性集群保存一些meta信息。
-
+Kafka是分布式发布-订阅消息日志服务。
+kafka对消息保存时根据Topic进行归类，发送消息者成为Producer,消息接受者成为Consumer,此外kafka集群有多个kafka实例组成，
+每个实例(server)成为broker。无论是kafka集群，还是producer和consumer都依赖于zookeeper来保证系统可用性集群保存一些meta信息。
 kafka1
-
 一个Kafka集群通常包括多个代理。为了均衡负载，将话题分成多个分区，每个代理存储一或多个分区。多个生产者和消费者能够同时生产和获取消息。
-
 kafka2
-
-一个Topic可以认为是一类消息，每个topic将被分成多个partition(区),每个partition在存储层面是append log文件。任何发布到此partition的消息都会被直接追加到log文件的尾部，每条消息在文件中的位置称为offset（偏移量），offset为一个long型数字，它是唯一标记一条消息。它唯一的标记一条消息。kafka并没有提供其他额外的索引机制来存储offset，因为在kafka中几乎不允许对消息进行“随机读写”。
-
-kafka和JMS（Java Message Service）实现(activeMQ)不同的是:即使消息被消费,消息仍然不会被立即删除.日志文件将会根据broker中的配置要求,保留一定的时间之后删除;比如log文件保留2天,那么两天后,文件会被清除,无论其中的消息是否被消费.kafka通过这种简单的手段,来释放磁盘空间,以及减少消息消费之后对文件内容改动的磁盘IO开支.
+一个Topic可以认为是一类消息，每个topic将被分成多个partition(区),每个partition在存储层面是append log文件。
+任何发布到此partition的消息都会被直接追加到log文件的尾部，每条消息在文件中的位置称为offset（偏移量），offset为一个long型数字，
+它是唯一标记一条消息，kafka并没有提供其他额外的索引机制来存储offset，因为在kafka中几乎不允许对消息进行“随机读写”。
+kafka和JMS（Java Message Service）实现(activeMQ)不同的是:即使消息被消费,消息仍然不会被立即删除.日志文件将会根据broker中的配置要求,
+保留一定的时间之后删除;比如log文件保留2天,那么两天后,文件会被清除,无论其中的消息是否被消费.kafka通过这种简单的手段,来释放磁盘空间,
+以及减少消息消费之后对文件内容改动的磁盘IO开支.
  
-    对于consumer而言,它需要保存消费消息的offset,对于offset的保存和使用,有consumer来控制;当consumer正常消费消息时,offset将会"线性"的向前驱动,即消息将依次顺序被消费.事实上consumer可以使用任意顺序消费消息,它只需要将offset重置为任意值..(offset将会保存在zookeeper中,参见下文)
+对于consumer而言,它需要保存消费消息的offset,对于offset的保存和使用,有consumer来控制;当consumer正常消费消息时,offset将会"线性"的向前驱动,
+即消息将依次顺序被消费.事实上consumer可以使用任意顺序消费消息,它只需要将offset重置为任意值
  
-    kafka集群几乎不需要维护任何consumer和producer状态信息,这些信息有zookeeper保存;因此producer和consumer的客户端实现非常轻量级,它们可以随意离开,而不会对集群造成额外的影响.
+kafka集群几乎不需要维护任何consumer和producer状态信息,这些信息有zookeeper保存;因此producer和consumer的客户端实现非常轻量级,
+它们可以随意离开,而不会对集群造成额外的影响.
  
-    partitions的设计目的有多个.最根本原因是kafka基于文件存储.通过分区,可以将日志内容分散到多个server上,来避免文件尺寸达到单机磁盘的上限,每个partiton都会被当前server(kafka实例)保存;可以将一个topic切分多任意多个partitions,来消息保存/消费的效率.此外越多的partitions意味着可以容纳更多的consumer,有效提升并发消费的能力.
+partitions的设计目的有多个.最根本原因是kafka基于文件存储.通过分区,可以将日志内容分散到多个server上,来避免文件尺寸达到单机磁盘的上限,
+每个partiton都会被当前server(kafka实例)保存;可以将一个topic切分多任意多个partitions,来消息保存/消费的效率.
+此外越多的partitions意味着可以容纳更多的consumer,有效提升并发消费的能力.
  
 Distribution
-    一个Topic的多个partitions,被分布在kafka集群中的多个server上;每个server(kafka实例)负责partitions中消息的读写操作;此外kafka还可以配置partitions需要备份的个数(replicas),每个partition将会被备份到多台机器上,以提高可用性.
+一个Topic的多个partitions,被分布在kafka集群中的多个server上;每个server(kafka实例)负责partitions中消息的读写操作;
+此外kafka还可以配置partitions需要备份的个数(replicas),每个partition将会被备份到多台机器上,以提高可用性.
+基于replicated方案,那么就意味着需要对多个备份进行调度;每个partition都有一个server为"leader";leader负责所有的读写操作,如果leader失效,
+那么将会有其他follower来接管(成为新的leader);follower只是单调的和leader跟进,同步消息即可，由此可见作为leader的server承载了全部的请求压力,
+因此从集群的整体考虑,有多少个partitions就意味着有多少个"leader",kafka会将"leader"均衡的分散在每个实例上,来确保整体的性能稳定.
  
-    基于replicated方案,那么就意味着需要对多个备份进行调度;每个partition都有一个server为"leader";leader负责所有的读写操作,如果leader失效,那么将会有其他follower来接管(成为新的leader);follower只是单调的和leader跟进,同步消息即可..由此可见作为leader的server承载了全部的请求压力,因此从集群的整体考虑,有多少个partitions就意味着有多少个"leader",kafka会将"leader"均衡的分散在每个实例上,来确保整体的性能稳定.
+Producers
+Producer将消息发布到指定的Topic中,同时Producer也能决定将此消息归属于哪个partition;比如基于"round-robin"方式或者通过其他的一些算法等.
  
-    Producers
-    Producer将消息发布到指定的Topic中,同时Producer也能决定将此消息归属于哪个partition;比如基于"round-robin"方式或者通过其他的一些算法等.
- 
-    Consumers
-    本质上kafka只支持Topic.每个consumer属于一个consumer group;反过来说,每个group中可以有多个consumer.发送到Topic的消息,只会被订阅此Topic的每个group中的一个consumer消费.
- 
-    如果所有的consumer都具有相同的group,这种情况和queue模式很像;消息将会在consumers之间负载均衡.
-    如果所有的consumer都具有不同的group,那这就是"发布-订阅";消息将会广播给所有的消费者.
-    在kafka中,一个partition中的消息只会被group中的一个consumer消费;每个group中consumer消息消费互相独立;我们可以认为一个group是一个"订阅"者,一个Topic中的每个partions,只会被一个"订阅者"中的一个consumer消费,不过一个consumer可以消费多个partitions中的消息.kafka只能保证一个partition中的消息被某个consumer消费时,消息是顺序的.事实上,从Topic角度来说,消息仍不是有序的.
- 
-    kafka的设计原理决定,对于一个topic,同一个group中不能有多于partitions个数的consumer同时消费,否则将意味着某些consumer将无法得到消息.
- 
-    Guarantees
-    1) 发送到partitions中的消息将会按照它接收的顺序追加到日志中
-    2) 对于消费者而言,它们消费消息的顺序和日志中消息顺序一致.
-    3) 如果Topic的"replicationfactor"为N,那么允许N-1个kafka实例失效.
+Consumers
+本质上kafka只支持Topic.每个consumer属于一个consumer group;反过来说,每个group中可以有多个consumer.发送到Topic的消息,
+只会被订阅此Topic的每个group中的一个consumer消费.
  
 ZooKeeper与Kafka
-有多个服务器的分布式系统，每台服务器都负责保存数据，在数据上执行操作。这样的潜在例子包括分布式搜索引擎、分布式构建系统或者已知的系统如Apache Hadoop。所有这些分布式系统的一个常见问题是，你如何在任一时间点确定哪些服务器活着并且在工作中。最重要的是，当面对这些分布式计算的难题，例如网络失败、带宽限制、可变延迟连接、安全问题以及任何网络环境，甚至跨多个数据中心时可能发生的错误时，你如何可靠地做这些事。这些正是Apache ZooKeeper所关注的问题，它是一个快速、高可用、容错、分布式的协调服务。你可以使用ZooKeeper构建可靠的、分布式的数据结构，用于群组成员、领导人选举、协同工作流和配置服务，以及广义的分布式数据结构如锁、队列、屏障（Barrier）和锁存器（Latch）。许多知名且成功的项目依赖于ZooKeeper，其中包括HBase、Hadoop 2.0、Solr Cloud、Neo4J、Apache Blur（Incubating）和Accumulo。
+所有这些分布式系统的一个常见问题是，你如何在任一时间点确定哪些服务器活着并且在工作中。
+这正是Apache ZooKeeper所关注的问题，它是一个快速、高可用、容错、分布式的协调服务。你可以使用ZooKeeper构建可靠的、分布式的数据结构，用于群组成员、领导人选举、协同工作流和配置服务等
 
-ZooKeeper是一个分布式的、分层级的文件系统，能促进客户端间的松耦合，并提供最终一致的，类似于传统文件系统中文件和目录的Znode视图。它提供了基本的操作，例如创建、删除和检查Znode是否存在。它提供了事件驱动模型，客户端能观察特定Znode的变化，例如现有Znode增加了一个新的子节点。ZooKeeper运行多个ZooKeeper服务器，称为Ensemble，以获得高可用性。每个服务器都持有分布式文件系统的内存复本，为客户端的读取请求提供服务。
+ZooKeeper是一个分布式的、分层级的文件系统，能促进客户端间的松耦合，并提供最终一致的，类似于传统文件系统中文件和目录的Znode视图。
+它提供了基本的操作，例如创建、删除和检查Znode是否存在。它提供了事件驱动模型，客户端能观察特定Znode的变化，例如现有Znode增加了一个新的子节点。
+ZooKeeper运行多个ZooKeeper服务器，称为Ensemble，以获得高可用性。每个服务器都持有分布式文件系统的内存复本，为客户端的读取请求提供服务。
 
-zookeeper1
+典型的ZooKeeper ensemble，一台服务器作为Leader，其它作为Follower。当Ensemble启动时，先选出Leader，然后所有Follower复制Leader的状态。
+所有写请求都通过Leader路由，变更会广播给所有Follower。变更广播被称为原子广播。
 
-典型的ZooKeeper ensemble，一台服务器作为Leader，其它作为Follower。当Ensemble启动时，先选出Leader，然后所有Follower复制Leader的状态。所有写请求都通过Leader路由，变更会广播给所有Follower。变更广播被称为原子广播。
+Kafka中ZooKeeper的用途：正如ZooKeeper用于分布式系统的协调和促进，Kafka使用ZooKeeper也是基于相同的原因。ZooKeeper用于管理、协调Kafka代理。
+每个Kafka代理都通过ZooKeeper协调其它Kafka代理。当Kafka系统中新增了代理或者某个代理故障失效时，ZooKeeper服务将通知生产者和消费者。
+生产者和消费者据此开始与其它代理协调工作。
 
-Kafka中ZooKeeper的用途：正如ZooKeeper用于分布式系统的协调和促进，Kafka使用ZooKeeper也是基于相同的原因。ZooKeeper用于管理、协调Kafka代理。每个Kafka代理都通过ZooKeeper协调其它Kafka代理。当Kafka系统中新增了代理或者某个代理故障失效时，ZooKeeper服务将通知生产者和消费者。生产者和消费者据此开始与其它代理协调工作。Kafka整体系统架构所示。
 
-服务器地址遵循server.X=hostname:peerPort:leaderPort 格式，
-参数说明：x                服务器的D，必须是一个整数，不一定要从0 开始，也不要求是连续的;hostnam    
-服务器的机器名或IP 地址：
-peerPort    用于节点间通信的TCP 端口；
-leaderPort    用于首领选举的TCP 端口。
+集群安装说明：
+192.168.112.130-132这3个节点同时安装zk和kafka集群，同时使用192.168.112.133-134来做为客户端，也就是生产者和消费者
+如下是192.168.112.130节点的安装步骤，其他节点参照即可
+]# wget http://mirror.bit.edu.cn/apache/zookeeper/zookeeper-3.4.10/zookeeper-3.4.10.tar.gz
+]# wget http://mirrors.shuosc.org/apache/kafka/0.10.2.1/kafka_2.10-0.10.2.1.tgz
+]# yum install -y java-1.8.0-openjdk.x86_64
+因为kafka要依赖到zk，所以要先安装zk
+]# tar -zxvf zookeeper-3.4.10.tar.gz  -C /usr/local
+]# cd /usr/local
+]# ln -sv zookeeper-3.4.10 zookeeper
+]# cd zookeeper/conf
+]# cp zoo_sample.cfg zoo.cfg
+]# mkdir -p /data/zk_data  #创建zk数据存放目录
+]# echo 101 > /data/zk_data/myid  #131和132节点分别是102，103
+]# vi  zoo.cfg 
+# The number of milliseconds of each tick
+tickTime=2000
+# The number of ticks that the initial 
+# synchronization phase can take
+initLimit=10
+# The number of ticks that can pass between 
+# sending a request and getting an acknowledgement
+syncLimit=5
+# the directory where the snapshot is stored.
+# do not use /tmp for storage, /tmp here is just 
+# example sakes.
+dataDir=/data/zk_data
+# the port at which the clients will connect
+clientPort=2181
+server.101=192.168.112.130:2888:3888
+server.102=192.168.112.131:2888:3888
+server.103=192.168.112.132:2888:3888
+]# cd /usr/local/zookeeper/bin/
+]# ./zkServer.sh start  三个节点最好同时启动
+]# netstat -tunlp 查看2181，2888，3888端口是否开启，3888只会在leader节点开启
+]# ./zkServer.sh status
+ZooKeeper JMX enabled by default
+Using config: /usr/local/zookeeper/bin/../conf/zoo.cfg
+Mode: follower
+]# ll /data/zk_data/
+total 12
+-rw-r--r-- 1 root root    4 Oct  9 07:18 myid
+drwxr-xr-x 2 root root 4096 Oct 10 05:59 version-2
+-rw-r--r-- 1 root root    4 Oct 10 05:58 zookeeper_server.pid
+补充说明：
+Zookeeper默认会将控制台信息输出到启动路径下的zookeeper.out中
+显然在生产环境中我们不能允许Zookeeper这样做，通过如下方法，可以让Zookeeper输出按尺寸切分的日志文件：
+修改conf/log4j.properties
+zookeeper.root.logger=INFO, CONSOLE改为zookeeper.root.logger=INFO, ROLLINGFILE
+修改bin/zkEnv.sh文件
+ZOO_LOG4J_PROP="INFO,CONSOLE"改为ZOO_LOG4J_PROP="INFO,ROLLINGFILE"
+
+server.X=hostname:peerPort:leaderPort 格式，
+参数说明：
+x是服务器的D，必须是一个整数，不一定要从0 开始，也不要求是连续的;
+hostnam是服务器的机器名或IP 地址：
+peerPort是用于节点间通信的TCP 端口；
+leaderPort是用于首领选举的TCP 端口。
+如下是kafka的安装
+]# tar -zxvf kafka_2.10-0.10.2.1.tgz -C /usr/local
+]# cd /usr/local
+]# ln -sv kafka_2.10-0.10.2.1 kafka
+]# mkdir -p /data/kfk_data  #创建消息文件存储的路径
+]# vi kafka/config/server.properties
+broker.id=101  #其他节点分别是102，103
+#如下port和host.name原始配置文件没有，但必须加上，否则启动不了#
+port=9092  
+host.name=192.168.112.130
+log.dirs=/data/kfk_data
+zookeeper.connect=192.168.112.130:2181,192.168.112.131:2181,192.168.112.132:2181
+]# cd kafka/bin
+]# ./kafka-server-start.sh -daemon  /usr/local/kafka/config/server.properties 这样不会产生nohup.out
+]# ./kafka-server-start.sh /usr/local/kafka/config/server.properties & 这样启动会产生nohup.out
+]# netstat -tunlp 查看9092端口是否开启
+]# ll /data/kfk_data/  
+total 4
+-rw-r--r-- 1 root root  0 Oct  9 08:26 cleaner-offset-checkpoint
+-rw-r--r-- 1 root root 56 Oct  9 08:26 meta.properties
+-rw-r--r-- 1 root root  0 Oct  9 08:26 recovery-point-offset-checkpoint
+-rw-r--r-- 1 root root  0 Oct  9 08:26 replication-offset-checkpoint
+测试验证,在生产环境中，实际的生产者和消费者都是程序，不会是命令行
+192.168.112.133当成消费者
+由于kafka和zk都是集群，所以ip地址指向集群中的任意一个地址都可以
+]# ./kafka-topics.sh --create --zookeeper 192.168.112.130:2181 --replication-factor 2 --partitions 1 --topic kafka_test1
+]# ./kafka-console-consumer.sh --zookeeper 192.168.112.132:2181 --topic kafka_test1 --from-beginning
+Using the ConsoleConsumer with old consumer is deprecated and will be removed in a future major release. Consider using the new consumer by passing [bootstrap-server] instead of [zookeeper].
+sdfjskd
+234324
+192.168.112.134当成生产者
+]# ./kafka-console-producer.sh --broker-list 192.168.112.131:9092 --topic kafka_test1
+sdfjskd
+234324
+
+
+docker安装kafka，在docker官网搜索wurstmeister，可以获取指定版本的kafka和zookeeper
+1、启动zookeeper
+docker run -d --name zookeeper -p 2181:2181  -t wurstmeister/zookeeper
+2、启动kafka
+docker run -d  --name kafka -e HOST_IP=localhost -e KAFKA_ADVERTISED_PORT=9092 -e KAFKA_BROKER_ID=1 -e ZK=zk -p 9092:9092  
+               --link zookeeper:zk -t wurstmeister/kafka
+--link实际就是在kafka容器的/etc/hosts增加了一条解析条目，具体请参考docker的容器互联使用案例
+3、测试发送消息
+docker exec -it ${CONTAINER ID} /bin/bash   进入kafka容器内部
+cd opt/kafka_2.11-0.10.1.1/
+bin/kafka-topics.sh --create --zookeeper zookeeper:2181 --replication-factor 1 --partitions 1 --topic mykafka
+bin/kafka-console-producer.sh --broker-list localhost:9092 --topic mykafka
+旧版本命令
+bin/kafka-console-consumer.sh --zookeeper zookeeper:2181 --topic mykafka --from-beginning
+新版本命令
+bin/kafka-console-consumer.sh --bootstrap-server  10.10.214.10:9092 --topic mykafka
+查看有哪些topic
+kafka-topics.sh --list  --zookeeper zk:2181
+查找kafka的版本
+find ./libs/ -name \*kafka_\* | head -1 | grep -o '\kafka[^\n]*'
+from your kafka folder (and it will do the same for you). It will return you something like kafka_2.9.2-0.8.1.1.jar.asc where 0.8.1.1 is your kafka version
+
+外网无法访问kafka原因：
+1)kafka配置文件server.properties中，host.name只绑定在了内部的IP上面，对外的网卡无法访问，也就是物理业务系统服务器上面并不能识别到kafka服务名；
+把host.name设置为空的话kafka会监听端口在所有的网卡上绑定。但是在外网访问时，客户端又遇到了“java.nio.channels.ClosedChannelException”异常信息，
+server端用tcpdump分析的时候发现客户端有传递kafka所在容器的服务名过来。
+在client里断点跟踪一下发现是findLeader的时候返回的元信息是容器服务名而不是IP。
+业务系统客户端无法解析这个机器名所以出现了前面的异常。
+在server.properties 里还有另一个参数是解决这个问题的， advertised.host.name参数用来配置返回的host.name值，把这个参数配置为局域网IP地址即可。
+这个参数默认没有启用，默认是返回的java.net.InetAddress.getCanonicalHostName的值。
+除了IP之外，还有PORT，外网对应的PORT也需要修改。
+针对docker容器可以用环境变量参数将具体的参数传递进去：
+KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://xxx.xxx.xxx.xxx：port （局域网宿主机的IP地址而非容器的IP，及暴露出来的端口）
+针对局域网向公网IP端口暴露的话，这修改配置文件,加入以下配置：
+advertised.listeners=PLAINTEXT://xxx.xxx.xxx.xxx:port　
+2)当Kafka broker启动时，它会在ZK上注册自己的IP和端口号，客户端就通过这个IP和端口号来连接。
+此时就需要显示指定 advertised.host.name, advertised.listeners参数，让注册到ZK上的IP是外部IP。
+需要在server.properties 配置文件里增加如下配置（版本0.10.x broker及之后的新版本）：
+新版本0.10.x broker配置弃用了advertised.host.name和 advertised.port这两个个配置项，就配置advertised.listeners就可以了。
 
