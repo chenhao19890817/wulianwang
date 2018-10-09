@@ -50,3 +50,10 @@ zookeeper1
 典型的ZooKeeper ensemble，一台服务器作为Leader，其它作为Follower。当Ensemble启动时，先选出Leader，然后所有Follower复制Leader的状态。所有写请求都通过Leader路由，变更会广播给所有Follower。变更广播被称为原子广播。
 
 Kafka中ZooKeeper的用途：正如ZooKeeper用于分布式系统的协调和促进，Kafka使用ZooKeeper也是基于相同的原因。ZooKeeper用于管理、协调Kafka代理。每个Kafka代理都通过ZooKeeper协调其它Kafka代理。当Kafka系统中新增了代理或者某个代理故障失效时，ZooKeeper服务将通知生产者和消费者。生产者和消费者据此开始与其它代理协调工作。Kafka整体系统架构所示。
+
+服务器地址遵循server.X=hostname:peerPort:leaderPort 格式，
+参数说明：x                服务器的D，必须是一个整数，不一定要从0 开始，也不要求是连续的;hostnam    
+服务器的机器名或IP 地址：
+peerPort    用于节点间通信的TCP 端口；
+leaderPort    用于首领选举的TCP 端口。
+
