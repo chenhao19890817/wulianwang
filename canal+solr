@@ -1,0 +1,28 @@
+对于mysql等数据库来说，它们在对于数据的io性能上十分卓越，当数据量上升到千万级别时，一个普通的数据分析sql—哪怕是分页查询的count，
+都能让数据库不堪重负。仅针对大数据量的搜索来说，可以采用solr或elasticSearch等方案，本文针对solr进行展开。
+
+数据的历史包袱
+通常一个平台的早期不会有数据瓶颈的压力，同时也为了平台能够快速上线，多半不会再最初始版本上solr等搜索引擎。
+等到要上solr时，必定要导入存量数据，而且还要考虑增量数据同时写入solr和mysql。
+
+存量数据的导入
+存量数据的导入十分方便，使用官方的data-import工具，只需配置好数据源和映射字段，然后通过前段页面点击导入即可，
+具体参见官方文档：https://lucene.apache.org/solr/guide/7_3/index.html。
+
+增量数据的写入
+通常的做法，找到sql中insert/update/delete语句调用的地方，写入mysql的同时另行写入solr，这样做的好处是一切简单明了，
+缺点也显而易见：代码的高侵入性。另一种思路是直接同步mysql和solr之间的数据库，通过binlog实现。
+通过binlog实现solr和mysql的数据同步
+这种方式原理很简单：
+mysql 数据变化，产生相应的binlog
+监听binlog数据，并及时消费
+解析binlog，然后将数据变化同步至solr
+这样一来，原代码需要修改的地方大大减少，只需将查询的数据源由mysql替换成solr即可。
+binlog消费可以采用alibaba的canal方案，服务端读取binlog，客户端解析binlog并写入solr。
+
+canal 简介
+canal的地址：https://github.com/alibaba/canal/  ，其原理：
+1. canal模拟mysql slave的交互协议，伪装自己为mysql slave，向mysql master发送dump协议
+2. mysql master收到dump请求，开始推送binary log给slave(也就是canal)
+3. canal解析binary log对象(原始为byte流)
+
